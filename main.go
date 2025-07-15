@@ -53,13 +53,17 @@ func main() {
 			return server
 		}, nil)
 		log.Printf("MCP handler listening at %s", *httpAddr)
-		http.ListenAndServe(*httpAddr, handler)
+		if err := http.ListenAndServe(*httpAddr, handler); err != nil {
+			log.Fatalf("HTTP server failed: %v", err)
+		}
 	} else if *sseAddr != "" {
 		handler := mcp.NewSSEHandler(func(*http.Request) *mcp.Server {
 			return server
 		})
 		log.Printf("MCP SSE handler listening at %s", *sseAddr)
-		http.ListenAndServe(*sseAddr, handler)
+		if err := http.ListenAndServe(*sseAddr, handler); err != nil {
+			log.Fatalf("SSE server failed: %v", err)
+		}
 	} else {
 		t := mcp.NewLoggingTransport(mcp.NewStdioTransport(), os.Stderr)
 		if err := server.Run(context.Background(), t); err != nil {
