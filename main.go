@@ -12,8 +12,9 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-var httpAddr = flag.String("http", "", "if set, use streamable HTTP at this address, instead of stdin/stdout")
-var sseAddr = flag.String("sse", "", "if set, use SSE at this address, instead of stdin/stdout")
+var httpAddr = flag.String("http", "localhost:3001", "if set, use streamable HTTP at this address, instead of stdin/stdout")
+var sseAddr = flag.String("sse", "localhost:3002", "if set, use SSE at this address, instead of stdin/stdout")
+var stdioFlag = flag.Bool("stdio", false, "if set, use stdin/stdout transport instead of HTTP/SSE")
 
 type HiArgs struct {
 	Name string `json:"name" jsonschema:"the name to say hi to"`
@@ -48,28 +49,38 @@ func main() {
 		URI:      "embedded:info",
 	}, handleEmbeddedResource)
 
-	if *httpAddr != "" {
-		handler := mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server {
-			return server
-		}, nil)
-		log.Printf("MCP handler listening at %s", *httpAddr)
-		if err := http.ListenAndServe(*httpAddr, handler); err != nil {
-			log.Fatalf("HTTP server failed: %v", err)
-		}
-	} else if *sseAddr != "" {
-		handler := mcp.NewSSEHandler(func(*http.Request) *mcp.Server {
-			return server
-		})
-		log.Printf("MCP SSE handler listening at %s", *sseAddr)
-		if err := http.ListenAndServe(*sseAddr, handler); err != nil {
-			log.Fatalf("SSE server failed: %v", err)
-		}
-	} else {
+	errs := make(chan error, 2)
+
+	if *stdioFlag {
 		t := mcp.NewLoggingTransport(mcp.NewStdioTransport(), os.Stderr)
 		if err := server.Run(context.Background(), t); err != nil {
 			log.Printf("Server failed: %v", err)
 		}
+		return
 	}
+
+	if *httpAddr != "" {
+		go func() {
+			handler := mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server {
+				return server
+			}, nil)
+			log.Printf("MCP handler listening at %s", *httpAddr)
+			errs <- http.ListenAndServe(*httpAddr, handler)
+		}()
+	}
+
+	if *sseAddr != "" {
+		go func() {
+			handler := mcp.NewSSEHandler(func(*http.Request) *mcp.Server {
+				return server
+			})
+			log.Printf("MCP SSE handler listening at %s", *sseAddr)
+			errs <- http.ListenAndServe(*sseAddr, handler)
+		}()
+	}
+
+	log.Printf("If you want to use stdin/stdout, pass the --stdio flag")
+	log.Fatalf("Server exited: %v", <-errs)
 }
 
 var embeddedResources = map[string]string{
